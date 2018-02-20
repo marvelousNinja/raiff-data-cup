@@ -1,0 +1,15 @@
+version: "3"
+services:
+  overpass:
+    image: wiktorn/overpass-api
+    ports:
+      - 12345:80
+    environment:
+      - OVERPASS_META=no
+      - OVERPASS_RULES_LOAD=1
+      - OVERPASS_MODE=init
+      - OVERPASS_PLANET_URL=http://download.geofabrik.de/russia-latest.osm.bz2
+      - OVERPASS_COMPRESSION=gz
+      - OVERPASS_DIFF_URL=http://download.geofabrik.de/russia-updates
+    volumes:
+      - ./osm:/db
