@@ -29,7 +29,7 @@ def target_encode(df, source_df, column_names, target_column):
     k = 100
     encoded_column_name = f'encoded_{"_".join(column_names)}'
     averages[encoded_column_name] = (global_mean * k + averages['mean'] * averages['count']) / (k + averages['count'])
-    combined = pd.Series(index=df.index, data=list(map(tuple, df[column_names].values)))
+    combined = pd.Series(index=df.index, data=list(map(tuple, df[column_names].values)), name=encoded_column_name)
     return combined.map(averages[encoded_column_name]).fillna(global_mean)
 
 def calc_median_distance(group):
@@ -120,21 +120,20 @@ def fit():
     column_combinations += list(combinations(initial_columns, 3))
     column_combinations += list(combinations(initial_columns, 4))
 
+    pool = ThreadPool()
     train['n_fold'] = np.random.randint(0, 5, len(train))
     for n_fold in range(5):
         target_fold = train.loc[train.n_fold == n_fold]
         source_folds = train.loc[train.n_fold != n_fold]
 
-        pool = ThreadPool()
         for encoded_column in tqdm(map(partial(target_encode, target_fold, source_folds, target_column='is_close'), column_combinations)):
             train.loc[train.n_fold == n_fold, encoded_column.name] = encoded_column
 
     validation['rounded_amount'] = validation['amount'].round(2)
     validation['day_of_week'] = validation.transaction_date.dt.dayofweek
 
-    for combination in column_combinations:
-        feature_name = 'encoded_' + '_'.join(combination)
-        validation[feature_name] = target_encode(validation, train, combination, 'is_close')
+    for encoded_column in tqdm(map(partial(target_encode, validation, train, target_column='is_close'), column_combinations)):
+        validation[encoded_column.name] = encoded_column
 
     feature_columns = [c for c in train.columns if c.startswith('encoded')]
 
