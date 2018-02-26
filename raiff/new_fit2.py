@@ -7,6 +7,7 @@ from lightgbm.sklearn import LGBMClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import log_loss
 from sklearn.metrics import classification_report
+from sklearn.cluster import DBSCAN
 
 from raiff.utils import train_validation_holdout_split
 from raiff.utils import distance
@@ -26,6 +27,24 @@ def target_encode(df, source_df, column_names, target_column):
     k = 100
     averages[f'encoded_{"_".join(column_names)}'] = (global_mean * k + averages['mean'] * averages['count']) / (k + averages['count'])
     return df[grouped_column].map(averages[f'encoded_{"_".join(column_names)}']).fillna(global_mean)
+
+def calc_median_distance(group):
+    return pd.Series(index=group.index, data=distance(
+        group[['transaction_lat', 'transaction_lon']].median(),
+        group[['transaction_lat', 'transaction_lon']]
+    ))
+
+def cluster(group):
+    model = DBSCAN(eps=0.01)
+    return pd.Series(index=group.index, data=model.fit_predict(
+        group[['transaction_lat', 'transaction_lon']]
+    ))
+
+def cluster_size(group):
+    return pd.Series(index=group.index, data=len(group))
+
+def cluster_amount(group):
+    return pd.Series(index=group.index, data=group.amount.sum())
 
 def fit():
     train = pd.read_csv('./data/train_set.csv', parse_dates=['transaction_date'], dtype={
@@ -51,6 +70,18 @@ def fit():
     # 3. Task specific filtering
     train = train[~train.work_add_lat.isnull()]
 
+    grouped_by_customer = train.groupby('customer_id', sort=False, as_index=False, group_keys=False)
+    train['cluster_id'] = grouped_by_customer.apply(cluster)
+    train['median_distance'] = grouped_by_customer.apply(calc_median_distance)
+    train['rounded_median_distance'] = train['median_distance'].round(2)
+
+    grouped_by_cluster = train.groupby(['customer_id', 'cluster_id'], sort=False, as_index=False, group_keys=False)
+    train['cluster_median_distance'] = grouped_by_cluster.apply(calc_median_distance)
+    train['cluster_size'] = grouped_by_cluster.apply(cluster_size)
+    train['cluster_amount'] = grouped_by_cluster.apply(cluster_amount)
+    train['rounded_cluster_amount'] = train['cluster_amount'].round(2)
+    train['rounded_cluster_median_distance'] = train['cluster_median_distance'].round(2)
+
     # 4. Train, validation & holdout split
     train, validation, _ = train_validation_holdout_split(train)
 
@@ -73,7 +104,12 @@ def fit():
     train['rounded_amount'] = train['amount'].round(2)
     train['day_of_week'] = train.transaction_date.dt.dayofweek
 
-    initial_columns = ['mcc', 'city', 'rounded_amount', 'terminal_id', 'day_of_week']
+    initial_columns = [
+        'mcc', 'city', 'day_of_week', 'cluster_size', 'cluster_id', 'terminal_id',
+        'rounded_amount', 'rounded_cluster_amount',
+        'rounded_median_distance', 'rounded_cluster_median_distance'
+    ]
+
     column_combinations = list(combinations(initial_columns, 1))
     column_combinations += list(combinations(initial_columns, 2))
     column_combinations += list(combinations(initial_columns, 3))
