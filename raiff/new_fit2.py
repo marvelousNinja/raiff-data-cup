@@ -1,8 +1,12 @@
 from itertools import combinations
+from functools import partial
+from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import Pool
 
 import pandas as pd
 import numpy as np
 from fire import Fire
+from tqdm import tqdm
 from lightgbm.sklearn import LGBMClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import log_loss
@@ -12,21 +16,21 @@ from sklearn.cluster import DBSCAN
 from raiff.utils import train_validation_holdout_split
 from raiff.utils import distance
 
+def get_encoding(averages, global_mean, group):
+    try:
+        return pd.Series(index=group.index, data=averages.loc[group.iloc[0]].iloc[0])
+    except KeyError:
+        return pd.Series(index=group.index, data=global_mean)
+
 def target_encode(df, source_df, column_names, target_column):
-    df = df.copy()
-    source_df = source_df.copy()
-
     column_names = list(column_names)
-
-    grouped_column = 'grouped_column'
-    df[grouped_column] = np.sum(df[column_names].astype(str) + '_', axis=1)
-    source_df[grouped_column] = np.sum(source_df[column_names].astype(str) + '_', axis=1)
-
-    averages = source_df.groupby(grouped_column)[target_column].agg(['mean', 'count'])
+    averages = source_df.groupby(column_names)[target_column].agg(['mean', 'count'])
     global_mean = source_df[target_column].mean()
     k = 100
-    averages[f'encoded_{"_".join(column_names)}'] = (global_mean * k + averages['mean'] * averages['count']) / (k + averages['count'])
-    return df[grouped_column].map(averages[f'encoded_{"_".join(column_names)}']).fillna(global_mean)
+    encoded_column_name = f'encoded_{"_".join(column_names)}'
+    averages[encoded_column_name] = (global_mean * k + averages['mean'] * averages['count']) / (k + averages['count'])
+    combined = pd.Series(index=df.index, data=list(map(tuple, df[column_names].values)))
+    return combined.map(averages[encoded_column_name]).fillna(global_mean)
 
 def calc_median_distance(group):
     return pd.Series(index=group.index, data=distance(
@@ -70,17 +74,17 @@ def fit():
     # 3. Task specific filtering
     train = train[~train.work_add_lat.isnull()]
 
-    grouped_by_customer = train.groupby('customer_id', sort=False, as_index=False, group_keys=False)
-    train['cluster_id'] = grouped_by_customer.apply(cluster)
-    train['median_distance'] = grouped_by_customer.apply(calc_median_distance)
-    train['rounded_median_distance'] = train['median_distance'].round(2)
+    # grouped_by_customer = train.groupby('customer_id', sort=False, as_index=False, group_keys=False)
+    # train['cluster_id'] = grouped_by_customer.apply(cluster)
+    # train['median_distance'] = grouped_by_customer.apply(calc_median_distance)
+    # train['rounded_median_distance'] = train['median_distance'].round(2)
 
-    grouped_by_cluster = train.groupby(['customer_id', 'cluster_id'], sort=False, as_index=False, group_keys=False)
-    train['cluster_median_distance'] = grouped_by_cluster.apply(calc_median_distance)
-    train['cluster_size'] = grouped_by_cluster.apply(cluster_size)
-    train['cluster_amount'] = grouped_by_cluster.apply(cluster_amount)
-    train['rounded_cluster_amount'] = train['cluster_amount'].round(2)
-    train['rounded_cluster_median_distance'] = train['cluster_median_distance'].round(2)
+    # grouped_by_cluster = train.groupby(['customer_id', 'cluster_id'], sort=False, as_index=False, group_keys=False)
+    # train['cluster_median_distance'] = grouped_by_cluster.apply(calc_median_distance)
+    # train['cluster_size'] = grouped_by_cluster.apply(cluster_size)
+    # train['cluster_amount'] = grouped_by_cluster.apply(cluster_amount)
+    # train['rounded_cluster_amount'] = train['cluster_amount'].round(2)
+    # train['rounded_cluster_median_distance'] = train['cluster_median_distance'].round(2)
 
     # 4. Train, validation & holdout split
     train, validation, _ = train_validation_holdout_split(train)
@@ -105,9 +109,10 @@ def fit():
     train['day_of_week'] = train.transaction_date.dt.dayofweek
 
     initial_columns = [
-        'mcc', 'city', 'day_of_week', 'cluster_size', 'cluster_id', 'terminal_id',
-        'rounded_amount', 'rounded_cluster_amount',
-        'rounded_median_distance', 'rounded_cluster_median_distance'
+        'mcc', 'city', 'day_of_week', 'rounded_amount',
+        'terminal_id',
+        # 'cluster_id', 'cluster_size', 'rounded_cluster_amount', 'rounded_cluster_median_distance',
+        # 'rounded_median_distance',
     ]
 
     column_combinations = list(combinations(initial_columns, 1))
@@ -120,10 +125,9 @@ def fit():
         target_fold = train.loc[train.n_fold == n_fold]
         source_folds = train.loc[train.n_fold != n_fold]
 
-        for combination in column_combinations:
-            feature_name = 'encoded_' + '_'.join(combination)
-            print(f'Generating {feature_name}...')
-            train.loc[train.n_fold == n_fold, feature_name] = target_encode(target_fold, source_folds, combination, 'is_close')
+        pool = ThreadPool()
+        for encoded_column in tqdm(map(partial(target_encode, target_fold, source_folds, target_column='is_close'), column_combinations)):
+            train.loc[train.n_fold == n_fold, encoded_column.name] = encoded_column
 
     validation['rounded_amount'] = validation['amount'].round(2)
     validation['day_of_week'] = validation.transaction_date.dt.dayofweek
