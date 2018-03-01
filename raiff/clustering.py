@@ -1,5 +1,3 @@
-from functools import partial
-
 import numpy as np
 import pandas as pd
 from pandas.api.types import CategoricalDtype
@@ -19,9 +17,6 @@ from raiff.steps import russia_only
 from raiff.steps import rouble_only
 from raiff.steps import with_job
 from raiff.steps import with_transaction_location
-from raiff.steps import fit_categories
-from raiff.steps import transform_categories
-from raiff.steps import calc_is_close
 from raiff.utils import train_validation_holdout_split
 from raiff.utils import distance
 
@@ -29,7 +24,7 @@ def as_clusters(df):
     clusters = []
     for customer_id, transactions in tqdm(df.groupby('customer_id')):
         transactions = transactions.copy()
-        transactions['cluster_id'] = DBSCAN(eps=0.02).fit_predict(transactions[['transaction_lat', 'transaction_lon']])
+        transactions['cluster_id'] = DBSCAN(eps=0.005).fit_predict(transactions[['transaction_lat', 'transaction_lon']])
         work_add_lat, work_add_lon = transactions.iloc[0][['work_add_lat', 'work_add_lon']]
 
         for cluster_id, cluster in transactions.groupby('cluster_id'):
@@ -46,7 +41,7 @@ def as_clusters(df):
             day_histogram = cluster.transaction_date.dt.dayofweek.value_counts(normalize=True).add_prefix('day_hist_').to_dict()
 
             try:
-                area = ConvexHull(cluster[['transaction_lat', 'transaction_lon']]).area
+                area = ConvexHull(cluster[['transaction_lat', 'transaction_lon']]).area # pylint: disable=no-member
             except Exception as e:
                 area = 0
 
