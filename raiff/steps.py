@@ -3,6 +3,7 @@ import pandas as pd
 import reverse_geocoder as rg
 
 from raiff.utils import distance
+from raiff.utils import has_columns
 
 def read(path):
     return pd.read_csv(path, parse_dates=['transaction_date'], dtype={
@@ -33,6 +34,19 @@ def with_transaction_location(df):
 
 def with_job(df):
     return df[df.work_add_lat.notnull()]
+
+def with_home(df):
+    return df[df.work_add_lat.notnull()]
+
+def with_columns(columns, df):
+    if has_columns(columns, df):
+        return df.dropna(subset=columns)
+    else:
+        return df
+
+def fix_mcc(df):
+    df['mcc'] = df.mcc.astype('str').str.replace(',', '').astype('float')
+    return df
 
 def with_solution(df):
     mean_target = df.groupby('customer_id')['is_close'].mean()

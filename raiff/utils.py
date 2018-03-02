@@ -21,3 +21,10 @@ def train_validation_holdout_split(df, seed=11):
     validation = pd.concat(groups[int(group_count * 0.7):int(group_count * 0.85)])
     holdout = pd.concat(groups[int(group_count * 0.85):])
     return train, validation, holdout
+
+def has_columns(columns, df):
+    return all(column in df.columns for column in columns)
+
+def generate_submission_name():
+    timestr = datetime.utcnow().strftime('%Y%m%d_%H%M')
+    return f'submission-{timestr}.csv'
