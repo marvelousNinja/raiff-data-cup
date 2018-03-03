@@ -23,4 +23,4 @@ def fit_pipeline(steps, X):
             transforms.append(step)
             X = step(X)
 
-    return partial(pipeline, transforms)
+    return partial(pipeline, transforms), X
