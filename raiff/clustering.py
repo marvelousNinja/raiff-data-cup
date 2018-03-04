@@ -29,14 +29,9 @@ from raiff.utils import generate_submission_name
 def as_clusters(target_columns, df):
     clusters = []
 
-    calc_labels = has_columns(target_columns, df)
-
     for customer_id, transactions in tqdm(df.groupby('customer_id')):
         transactions = transactions.copy()
         transactions['cluster_id'] = DBSCAN(eps=0.005).fit_predict(transactions[['transaction_lat', 'transaction_lon']])
-
-        if calc_labels:
-            target_lat, target_lon = transactions.iloc[0][target_columns]
 
         for cluster_id, cluster in transactions.groupby('cluster_id'):
             if cluster_id == -1: continue
@@ -45,14 +40,19 @@ def as_clusters(target_columns, df):
 
             amount_histogram = cluster.amount.round().value_counts(normalize=True)
             amount_histogram = amount_histogram.add_prefix('amount_hist_').to_dict()
-            mcc_whitelist = [5411.0, 6011.0, 5814.0, 5812.0, 5499.0, 5541.0, 5912.0, 4111.0, 5921.0, 5331.0, 5691.0, 5261.0, 5977.0]
+            mcc_whitelist = [
+                5411.0, 6011.0, 5814.0, 5812.0, 5499.0,
+                5541.0, 5912.0, 4111.0, 5921.0, 5331.0,
+                5691.0, 5261.0, 5977.0
+            ]
+
             mcc_histogram = cluster.mcc.astype('float').astype(CategoricalDtype(categories=mcc_whitelist)).value_counts(normalize=True, dropna=False)
             mcc_histogram = mcc_histogram.add_prefix('mcc_hist_').to_dict()
             day_histogram = cluster.transaction_date.dt.dayofweek.value_counts(normalize=True).add_prefix('day_hist_').to_dict()
 
             try:
                 area = ConvexHull(cluster[['transaction_lat', 'transaction_lon']]).area # pylint: disable=no-member
-            except Exception as e:
+            except Exception as _:
                 area = 0
 
             features = {
@@ -97,9 +97,13 @@ def as_clusters(target_columns, df):
                 **day_histogram
             }
 
-            if calc_labels:
+            if has_columns(target_columns, df):
+                target_lat, target_lon = transactions.iloc[0][target_columns]
                 target_distance = distance(np.array([target_lat, target_lon]), np.array([cluster_median.values]))[0]
+                features['distance'] = target_distance
                 features['is_close'] = int(target_distance <= 0.02)
+                features['target_lat'] = target_lat
+                features['target_lon'] = target_lon
 
             clusters.append(features)
 
@@ -122,8 +126,7 @@ def fit(objective):
         partial(as_clusters, target_columns)
     ]
 
-    pipeline = fit_pipeline(steps, train)
-    train = pipeline(train)
+    pipeline, train = fit_pipeline(steps, train)
     validation = pipeline(validation)
 
     feature_columns = [
