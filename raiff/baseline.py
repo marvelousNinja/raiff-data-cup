@@ -32,8 +32,7 @@ def fit():
         calc_is_close
     ]
 
-    pipeline = fit_pipeline(steps, train)
-    train = pipeline(train)
+    pipeline, train = fit_pipeline(steps, train)
     validation = pipeline(validation)
 
     feature_columns = ['mcc', 'city', 'amount', 'terminal_id']
