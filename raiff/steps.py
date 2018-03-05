@@ -1,6 +1,10 @@
 import numpy as np
 import pandas as pd
 import reverse_geocoder as rg
+from pandas.api.types import CategoricalDtype
+from sklearn.cluster import DBSCAN
+from tqdm import tqdm
+from scipy.spatial import ConvexHull
 
 from raiff.utils import distance
 from raiff.utils import has_columns
@@ -53,10 +57,10 @@ def with_solution(df):
     customer_ids = mean_target[mean_target > 0].index.values
     return df[df.customer_id.isin(customer_ids)]
 
-def calc_is_close(df):
+def calc_is_close(location_columns, target_columns, df):
     df['is_close'] = (distance(
-        df[['transaction_lat', 'transaction_lon']].values,
-        df[['work_add_lat', 'work_add_lon']].values
+        df[[location_columns]].values,
+        df[[target_columns]].values
     ) <= 0.02).astype(int)
 
     return df
@@ -110,3 +114,99 @@ def add_week_day(df):
 def add_month_day(df):
     df['month_day'] = df['transaction_date'].dt.day
     return df
+
+def get_cluster_ids(transactions):
+    model = DBSCAN(eps=0.005)
+    ids = model.fit_predict(transactions[['transaction_lat', 'transaction_lon']])
+    return pd.Series(index=transactions.index, data=ids)
+
+def cluster(df):
+    grouped_by_customer = df.groupby('customer_id', sort=False, as_index=False, group_keys=False)
+    df['cluster_id'] = grouped_by_customer.apply(get_cluster_ids)
+    return df
+
+def calculate_cluster_features(df):
+    clusters = []
+
+    for customer_id, transactions in tqdm(df.groupby('customer_id')):
+        for cluster_id, cluster_transactions in transactions.groupby('cluster_id'):
+            if cluster_id == -1: continue
+
+            cluster_median = cluster_transactions[['transaction_lat', 'transaction_lon']].median()
+            amount_histogram = cluster_transactions.amount.round().value_counts(normalize=True)
+            amount_histogram = amount_histogram.add_prefix('amount_hist_').to_dict()
+            mcc_whitelist = [
+                5411.0, 6011.0, 5814.0, 5812.0, 5499.0,
+                5541.0, 5912.0, 4111.0, 5921.0, 5331.0,
+                5691.0, 5261.0, 5977.0
+            ]
+
+            mcc_histogram = cluster_transactions.mcc.astype('float').astype(CategoricalDtype(categories=mcc_whitelist)).value_counts(normalize=True, dropna=False)
+            mcc_histogram = mcc_histogram.add_prefix('mcc_hist_').to_dict()
+            day_histogram = cluster_transactions.transaction_date.dt.dayofweek.value_counts(normalize=True).add_prefix('day_hist_').to_dict()
+
+            try:
+                # pylint: disable=no-member
+                area = ConvexHull(cluster_transactions[['transaction_lat', 'transaction_lon']]).area
+            # pylint: disable=broad-except
+            except Exception as _:
+                area = 0
+
+            # TODO AS: Might reconsider this later
+            first_transaction = transactions.iloc[0]
+
+            features = {
+                'cluster_id': cluster_id,
+                'customer_id': customer_id,
+                'cluster_lat': cluster_median['transaction_lat'],
+                'cluster_lon': cluster_median['transaction_lon'],
+                'home_add_lat': first_transaction['home_add_lat'],
+                'home_add_lon': first_transaction['home_add_lon'],
+                'work_add_lat': first_transaction['work_add_lat'],
+                'work_add_lon': first_transaction['work_add_lon'],
+                'area': area,
+                'transaction_ratio': len(cluster_transactions) / len(transactions),
+                'amount_ratio': np.sum(np.exp(cluster_transactions.amount)) / np.sum(np.exp(transactions.amount)),
+                'date_ratio': len(cluster_transactions.transaction_date.unique()) / len(transactions.transaction_date.unique()),
+                'amount_hist_-2.0': 0,
+                'amount_hist_-1.0': 0,
+                'amount_hist_0.0': 0,
+                'amount_hist_1.0': 0,
+                'amount_hist_2.0': 0,
+                'amount_hist_3.0': 0,
+                'amount_hist_4.0': 0,
+                'amount_hist_5.0': 0,
+                'amount_hist_6.0': 0,
+                **amount_histogram,
+                'mcc_hist_5411.0': 0,
+                'mcc_hist_6011.0': 0,
+                'mcc_hist_5814.0': 0,
+                'mcc_hist_5812.0': 0,
+                'mcc_hist_5499.0': 0,
+                'mcc_hist_4111.0': 0,
+                'mcc_hist_5921.0': 0,
+                'mcc_hist_5331.0': 0,
+                'mcc_hist_5691.0': 0,
+                'mcc_hist_5261.0': 0,
+                'mcc_hist_5977.0': 0,
+                'mcc_hist_nan': 0,
+                **mcc_histogram,
+                'day_hist_0': 0,
+                'day_hist_1': 0,
+                'day_hist_2': 0,
+                'day_hist_3': 0,
+                'day_hist_4': 0,
+                'day_hist_5': 0,
+                'day_hist_6': 0,
+                **day_histogram
+            }
+
+            clusters.append(features)
+
+    return pd.DataFrame(clusters)
+
+def merge_cluster_features(df):
+    # TODO AS: -1 clusters are ignored
+    clusters = calculate_cluster_features(df)
+    df = pd.merge(df, clusters, how='left', on=['customer_id', 'cluster_id'])
+    return df[df.cluster_id != -1].copy()

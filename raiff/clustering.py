@@ -1,6 +1,7 @@
 import os
 from functools import partial
 
+import overpass
 import numpy as np
 import pandas as pd
 from pandas.api.types import CategoricalDtype
@@ -21,93 +22,11 @@ from raiff.steps import rouble_only
 from raiff.steps import with_columns
 from raiff.steps import fix_mcc
 from raiff.steps import with_transaction_location
+from raiff.steps import cluster
+from raiff.steps import calculate_cluster_features
+from raiff.steps import calc_is_close
 from raiff.utils import train_validation_holdout_split
-from raiff.utils import distance
-from raiff.utils import has_columns
 from raiff.utils import generate_submission_name
-
-def as_clusters(target_columns, df):
-    clusters = []
-
-    for customer_id, transactions in tqdm(df.groupby('customer_id')):
-        transactions = transactions.copy()
-        transactions['cluster_id'] = DBSCAN(eps=0.005).fit_predict(transactions[['transaction_lat', 'transaction_lon']])
-
-        for cluster_id, cluster in transactions.groupby('cluster_id'):
-            if cluster_id == -1: continue
-
-            cluster_median = cluster[['transaction_lat', 'transaction_lon']].median()
-
-            amount_histogram = cluster.amount.round().value_counts(normalize=True)
-            amount_histogram = amount_histogram.add_prefix('amount_hist_').to_dict()
-            mcc_whitelist = [
-                5411.0, 6011.0, 5814.0, 5812.0, 5499.0,
-                5541.0, 5912.0, 4111.0, 5921.0, 5331.0,
-                5691.0, 5261.0, 5977.0
-            ]
-
-            mcc_histogram = cluster.mcc.astype('float').astype(CategoricalDtype(categories=mcc_whitelist)).value_counts(normalize=True, dropna=False)
-            mcc_histogram = mcc_histogram.add_prefix('mcc_hist_').to_dict()
-            day_histogram = cluster.transaction_date.dt.dayofweek.value_counts(normalize=True).add_prefix('day_hist_').to_dict()
-
-            try:
-                area = ConvexHull(cluster[['transaction_lat', 'transaction_lon']]).area # pylint: disable=no-member
-            except Exception as _:
-                area = 0
-
-            features = {
-                'cluster_id': cluster_id,
-                'customer_id': customer_id,
-                'cluster_lat': cluster_median['transaction_lat'],
-                'cluster_lon': cluster_median['transaction_lon'],
-                'area': area,
-                'transaction_ratio': len(cluster) / len(transactions),
-                'amount_ratio': np.sum(np.exp(cluster.amount)) / np.sum(np.exp(transactions.amount)),
-                'date_ratio': len(cluster.transaction_date.unique()) / len(transactions.transaction_date.unique()),
-                'amount_hist_-2.0': 0,
-                'amount_hist_-1.0': 0,
-                'amount_hist_0.0': 0,
-                'amount_hist_1.0': 0,
-                'amount_hist_2.0': 0,
-                'amount_hist_3.0': 0,
-                'amount_hist_4.0': 0,
-                'amount_hist_5.0': 0,
-                'amount_hist_6.0': 0,
-                **amount_histogram,
-                'mcc_hist_5411.0': 0,
-                'mcc_hist_6011.0': 0,
-                'mcc_hist_5814.0': 0,
-                'mcc_hist_5812.0': 0,
-                'mcc_hist_5499.0': 0,
-                'mcc_hist_4111.0': 0,
-                'mcc_hist_5921.0': 0,
-                'mcc_hist_5331.0': 0,
-                'mcc_hist_5691.0': 0,
-                'mcc_hist_5261.0': 0,
-                'mcc_hist_5977.0': 0,
-                'mcc_hist_nan': 0,
-                **mcc_histogram,
-                'day_hist_0': 0,
-                'day_hist_1': 0,
-                'day_hist_2': 0,
-                'day_hist_3': 0,
-                'day_hist_4': 0,
-                'day_hist_5': 0,
-                'day_hist_6': 0,
-                **day_histogram
-            }
-
-            if has_columns(target_columns, df):
-                target_lat, target_lon = transactions.iloc[0][target_columns]
-                target_distance = distance(np.array([target_lat, target_lon]), np.array([cluster_median.values]))[0]
-                features['distance'] = target_distance
-                features['is_close'] = int(target_distance <= 0.02)
-                features['target_lat'] = target_lat
-                features['target_lon'] = target_lon
-
-            clusters.append(features)
-
-    return pd.DataFrame(clusters)
 
 def fit(objective):
     if objective == 'work':
@@ -123,7 +42,10 @@ def fit(objective):
         rouble_only,
         with_transaction_location,
         partial(with_columns, target_columns),
-        partial(as_clusters, target_columns)
+        cluster,
+        calculate_cluster_features,
+
+        partial(calc_is_close, ['cluster_lat', 'cluster_lon'], target_columns)
     ]
 
     pipeline, train = fit_pipeline(steps, train)
@@ -160,6 +82,8 @@ def fit(objective):
     print(f'Top1: {top1_accuracy:.5f}')
     print(f'Top5: {top5_accuracy:.5f}')
     print(f'Top10: {top10_accuracy:.5f}')
+
+    import pdb; pdb.set_trace()
 
     return model, pipeline, feature_columns
 
