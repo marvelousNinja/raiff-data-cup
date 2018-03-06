@@ -13,3 +13,4 @@ services:
       - OVERPASS_DIFF_URL=http://download.geofabrik.de/russia-updates
     volumes:
       - ./osm:/db
+      - ./supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
