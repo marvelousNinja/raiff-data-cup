@@ -48,5 +48,7 @@ logdir
 .kaggle-cli
 .env
 *.hdf5
-/data
-/osm
+/data/*
+/osm/*
+!/data/.gitkeep
+!/osm/.gitkeep
