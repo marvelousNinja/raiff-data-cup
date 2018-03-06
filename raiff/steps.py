@@ -1,3 +1,5 @@
+import overpass
+import requests
 import numpy as np
 import pandas as pd
 import reverse_geocoder as rg
@@ -5,6 +7,7 @@ from pandas.api.types import CategoricalDtype
 from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 from scipy.spatial import ConvexHull
+from retry.api import retry_call
 
 from raiff.utils import distance
 from raiff.utils import has_columns
@@ -59,8 +62,8 @@ def with_solution(df):
 
 def calc_is_close(location_columns, target_columns, df):
     df['is_close'] = (distance(
-        df[[location_columns]].values,
-        df[[target_columns]].values
+        df[location_columns].values,
+        df[target_columns].values
     ) <= 0.02).astype(int)
 
     return df
@@ -210,3 +213,83 @@ def merge_cluster_features(df):
     clusters = calculate_cluster_features(df)
     df = pd.merge(df, clusters, how='left', on=['customer_id', 'cluster_id'])
     return df[df.cluster_id != -1].copy()
+
+def query_osm(session, query):
+    # https://overpass.kumi.systems/api/interpreter
+    # https://overpass-api.de/api/interpreter
+    # http://localhost:12345/api/interpreter
+    response = session.post('http://localhost:12345/api/interpreter', data={'data': query})
+    response.raise_for_status()
+    return response.json()['elements']
+
+def query_surrounding_map(location_columns, df):
+    surroundings = ['atm', 'shop', 'apartment', 'industrial', 'natural']
+
+    for column_name in surroundings:
+        df[column_name] = 0
+
+    box_size = 0.002
+    half = box_size / 2
+
+    def is_shop(record):
+        tags = record.get('tags', {})
+        return 'shop' in tags
+
+    def is_natural(record):
+        tags = record.get('tags', {})
+        return 'natural' in tags
+
+    def is_apartment(record):
+        tags = record.get('tags', {})
+        return ('building' in tags) and (tags['building'] == 'apartments')
+
+    def is_industrial(record):
+        tags = record.get('tags', {})
+        return ('building' in tags) and (tags['building'] == 'industrial')
+
+    def is_atm(record):
+        tags = record.get('tags', {})
+        if 'atm' in tags:
+            return True
+
+        if 'amenity' in tags:
+            if tags['amenity'] == 'bank':
+                return True
+
+            if tags['amenity'] == 'atm':
+                return True
+
+        return False
+
+    session = requests.Session()
+
+    for index, row in tqdm(df.iterrows(), total=len(df)):
+        lat, lon = row[location_columns]
+
+        query = f"""
+            [out:json][bbox:{lat - half},{lon - half},{lat + half},{lon + half}];
+            (
+                node["atm"];
+                node["amenity"="atm"];
+                node["amenity"="bank"];
+                way["atm"];
+                node["natural"];
+                way["building"="apartments"];
+                way["building"="industrial"];
+                way["shop"];
+            );
+            (._;>;);
+            out body geom;
+        """
+
+        map_objects = retry_call(query_osm, fargs=(session, query), tries=3, delay=10)
+
+        df.loc[index, surroundings] = [
+            len(list(filter(is_atm, map_objects))),
+            len(list(filter(is_shop, map_objects))),
+            len(list(filter(is_apartment, map_objects))),
+            len(list(filter(is_industrial, map_objects))),
+            len(list(filter(is_natural, map_objects)))
+        ]
+
+    return df

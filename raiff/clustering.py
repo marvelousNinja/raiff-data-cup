@@ -1,18 +1,13 @@
 import os
 from functools import partial
 
-import overpass
 import numpy as np
 import pandas as pd
-from pandas.api.types import CategoricalDtype
 from fire import Fire
-from tqdm import tqdm
 from lightgbm.sklearn import LGBMClassifier
 from sklearn.metrics import log_loss
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import classification_report
-from sklearn.cluster import DBSCAN
-from scipy.spatial import ConvexHull
 
 from raiff.pipelines import fit_pipeline
 from raiff.steps import read
@@ -25,6 +20,7 @@ from raiff.steps import with_transaction_location
 from raiff.steps import cluster
 from raiff.steps import calculate_cluster_features
 from raiff.steps import calc_is_close
+from raiff.steps import query_surrounding_map
 from raiff.utils import train_validation_holdout_split
 from raiff.utils import generate_submission_name
 
@@ -36,6 +32,9 @@ def fit(objective):
 
     train, validation, _ = train_validation_holdout_split(read('./data/train_set.csv'))
 
+    train = train[:65000]
+    validation = validation[:65000]
+
     steps = [
         preprocess,
         russia_only,
@@ -44,7 +43,7 @@ def fit(objective):
         partial(with_columns, target_columns),
         cluster,
         calculate_cluster_features,
-
+        partial(query_surrounding_map, ['cluster_lat', 'cluster_lon']),
         partial(calc_is_close, ['cluster_lat', 'cluster_lon'], target_columns)
     ]
 
@@ -61,7 +60,8 @@ def fit(objective):
         'mcc_hist_5411.0', 'mcc_hist_5499.0', 'mcc_hist_5541.0',
         'mcc_hist_5691.0', 'mcc_hist_5812.0', 'mcc_hist_5814.0',
         'mcc_hist_5912.0', 'mcc_hist_5921.0', 'mcc_hist_5977.0',
-        'mcc_hist_6011.0', 'mcc_hist_nan', 'transaction_ratio'
+        'mcc_hist_6011.0', 'mcc_hist_nan', 'transaction_ratio',
+        'atm', 'shop', 'apartment', 'industrial', 'natural'
     ]
 
     print(f'Train size: {len(train)}, Validation size: {len(validation)}')
