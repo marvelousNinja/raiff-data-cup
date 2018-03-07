@@ -32,9 +32,6 @@ def fit(objective):
 
     train, validation, _ = train_validation_holdout_split(read('./data/train_set.csv'))
 
-    train = train[:65000]
-    validation = validation[:65000]
-
     steps = [
         preprocess,
         russia_only,

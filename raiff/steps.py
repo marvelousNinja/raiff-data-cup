@@ -1,4 +1,3 @@
-import overpass
 import requests
 import numpy as np
 import pandas as pd
@@ -8,9 +7,12 @@ from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 from scipy.spatial import ConvexHull
 from retry.api import retry_call
+from joblib.memory import Memory
 
 from raiff.utils import distance
 from raiff.utils import has_columns
+
+memory = Memory(cachedir='/tmp', verbose=0)
 
 def read(path):
     return pd.read_csv(path, parse_dates=['transaction_date'], dtype={
@@ -214,11 +216,12 @@ def merge_cluster_features(df):
     df = pd.merge(df, clusters, how='left', on=['customer_id', 'cluster_id'])
     return df[df.cluster_id != -1].copy()
 
-def query_osm(session, query):
+@memory.cache
+def query_osm(query):
     # https://overpass.kumi.systems/api/interpreter
     # https://overpass-api.de/api/interpreter
     # http://localhost:12345/api/interpreter
-    response = session.post('http://localhost:12345/api/interpreter', data={'data': query})
+    response = requests.post('http://localhost:12345/api/interpreter', data={'data': query})
     response.raise_for_status()
     return response.json()['elements']
 
@@ -228,7 +231,7 @@ def query_surrounding_map(location_columns, df):
     for column_name in surroundings:
         df[column_name] = 0
 
-    box_size = 0.002
+    box_size = 0.04
     half = box_size / 2
 
     def is_shop(record):
@@ -261,8 +264,6 @@ def query_surrounding_map(location_columns, df):
 
         return False
 
-    session = requests.Session()
-
     for index, row in tqdm(df.iterrows(), total=len(df)):
         lat, lon = row[location_columns]
 
@@ -282,7 +283,7 @@ def query_surrounding_map(location_columns, df):
             out body geom;
         """
 
-        map_objects = retry_call(query_osm, fargs=(session, query), tries=3, delay=10)
+        map_objects = retry_call(query_osm, fargs=[query], tries=3, delay=10)
 
         df.loc[index, surroundings] = [
             len(list(filter(is_atm, map_objects))),
