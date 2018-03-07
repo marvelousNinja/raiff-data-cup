@@ -216,12 +216,12 @@ def merge_cluster_features(df):
     df = pd.merge(df, clusters, how='left', on=['customer_id', 'cluster_id'])
     return df[df.cluster_id != -1].copy()
 
-@memory.cache
-def query_osm(query):
+@memory.cache(ignore=['session'])
+def query_osm(session, query):
     # https://overpass.kumi.systems/api/interpreter
     # https://overpass-api.de/api/interpreter
     # http://localhost:12345/api/interpreter
-    response = requests.post('http://localhost:12345/api/interpreter', data={'data': query})
+    response = session.post('http://localhost:12345/api/interpreter', data={'data': query})
     response.raise_for_status()
     return response.json()['elements']
 
@@ -264,6 +264,8 @@ def query_surrounding_map(location_columns, df):
 
         return False
 
+    session = requests.Session()
+
     for index, row in tqdm(df.iterrows(), total=len(df)):
         lat, lon = row[location_columns]
 
@@ -283,7 +285,7 @@ def query_surrounding_map(location_columns, df):
             out body geom;
         """
 
-        map_objects = retry_call(query_osm, fargs=[query], tries=3, delay=10)
+        map_objects = retry_call(query_osm, fargs=[session, query], tries=3, delay=10)
 
         df.loc[index, surroundings] = [
             len(list(filter(is_atm, map_objects))),
