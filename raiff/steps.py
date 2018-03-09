@@ -8,6 +8,7 @@ from tqdm import tqdm
 from scipy.spatial import ConvexHull
 from retry.api import retry_call
 from joblib.memory import Memory
+from sklearn.neighbors import KernelDensity
 
 from raiff.utils import distance
 from raiff.utils import has_columns
@@ -138,15 +139,19 @@ def calculate_cluster_features(df):
             if cluster_id == -1: continue
 
             cluster_median = cluster_transactions[['transaction_lat', 'transaction_lon']].median()
+
             amount_histogram = cluster_transactions.amount.round().value_counts(normalize=True)
             amount_histogram = amount_histogram.add_prefix('amount_hist_').to_dict()
             mcc_whitelist = [
-                5411.0, 6011.0, 5814.0, 5812.0, 5499.0,
-                5541.0, 5912.0, 4111.0, 5921.0, 5331.0,
-                5691.0, 5261.0, 5977.0
+                5411, 6011, 5814, 5812, 5499,
+                5541, 5912, 4111, 5921, 5331,
+                5691, 5261, 5977,
+                -1
             ]
 
-            mcc_histogram = cluster_transactions.mcc.astype('float').astype(CategoricalDtype(categories=mcc_whitelist)).value_counts(normalize=True, dropna=False)
+            mcc = cluster_transactions.mcc.copy()
+            mcc.loc[~mcc.isin(mcc_whitelist)] = -1
+            mcc_histogram = mcc.astype(CategoricalDtype(categories=mcc_whitelist)).value_counts(normalize=True)
             mcc_histogram = mcc_histogram.add_prefix('mcc_hist_').to_dict()
             day_histogram = cluster_transactions.transaction_date.dt.dayofweek.value_counts(normalize=True).add_prefix('day_hist_').to_dict()
 
@@ -183,18 +188,18 @@ def calculate_cluster_features(df):
                 'amount_hist_5.0': 0,
                 'amount_hist_6.0': 0,
                 **amount_histogram,
-                'mcc_hist_5411.0': 0,
-                'mcc_hist_6011.0': 0,
-                'mcc_hist_5814.0': 0,
-                'mcc_hist_5812.0': 0,
-                'mcc_hist_5499.0': 0,
-                'mcc_hist_4111.0': 0,
-                'mcc_hist_5921.0': 0,
-                'mcc_hist_5331.0': 0,
-                'mcc_hist_5691.0': 0,
-                'mcc_hist_5261.0': 0,
-                'mcc_hist_5977.0': 0,
-                'mcc_hist_nan': 0,
+                'mcc_hist_5411': 0,
+                'mcc_hist_6011': 0,
+                'mcc_hist_5814': 0,
+                'mcc_hist_5812': 0,
+                'mcc_hist_5499': 0,
+                'mcc_hist_4111': 0,
+                'mcc_hist_5921': 0,
+                'mcc_hist_5331': 0,
+                'mcc_hist_5691': 0,
+                'mcc_hist_5261': 0,
+                'mcc_hist_5977': 0,
+                'mcc_hist_-1': 0,
                 **mcc_histogram,
                 'day_hist_0': 0,
                 'day_hist_1': 0,

@@ -40,7 +40,7 @@ def fit(objective):
         partial(with_columns, target_columns),
         cluster,
         calculate_cluster_features,
-        partial(query_surrounding_map, ['cluster_lat', 'cluster_lon']),
+        # partial(query_surrounding_map, ['cluster_lat', 'cluster_lon']),
         partial(calc_is_close, ['cluster_lat', 'cluster_lon'], target_columns)
     ]
 
@@ -53,12 +53,12 @@ def fit(objective):
         'amount_hist_4.0', 'amount_hist_5.0', 'amount_hist_6.0', 'amount_ratio',
         'area', 'cluster_id', 'date_ratio', 'day_hist_0', 'day_hist_1',
         'day_hist_2', 'day_hist_3', 'day_hist_4', 'day_hist_5', 'day_hist_6',
-        'mcc_hist_4111.0', 'mcc_hist_5261.0', 'mcc_hist_5331.0',
-        'mcc_hist_5411.0', 'mcc_hist_5499.0', 'mcc_hist_5541.0',
-        'mcc_hist_5691.0', 'mcc_hist_5812.0', 'mcc_hist_5814.0',
-        'mcc_hist_5912.0', 'mcc_hist_5921.0', 'mcc_hist_5977.0',
-        'mcc_hist_6011.0', 'mcc_hist_nan', 'transaction_ratio',
-        'atm', 'shop', 'apartment', 'industrial', 'natural'
+        'mcc_hist_4111', 'mcc_hist_5261', 'mcc_hist_5331',
+        'mcc_hist_5411', 'mcc_hist_5499', 'mcc_hist_5541',
+        'mcc_hist_5691', 'mcc_hist_5812', 'mcc_hist_5814',
+        'mcc_hist_5912', 'mcc_hist_5921', 'mcc_hist_5977',
+        'mcc_hist_6011', 'mcc_hist_-1', 'transaction_ratio',
+        # 'atm', 'shop', 'apartment', 'industrial', 'natural'
     ]
 
     print(f'Train size: {len(train)}, Validation size: {len(validation)}')
@@ -74,9 +74,12 @@ def fit(objective):
 
     validation['probs'] = predictions[:, 1]
     top1_accuracy = validation.groupby('customer_id').apply(lambda group: group.sort_values('probs').tail(1).is_close.max()).mean()
+    top2_accuracy = validation.groupby('customer_id').apply(lambda group: group.sort_values('probs').tail(2).is_close.max()).mean()
     top5_accuracy = validation.groupby('customer_id').apply(lambda group: group.sort_values('probs').tail(5).is_close.max()).mean()
     top10_accuracy = validation.groupby('customer_id').apply(lambda group: group.sort_values('probs').tail(10).is_close.max()).mean()
+
     print(f'Top1: {top1_accuracy:.5f}')
+    print(f'Top2: {top2_accuracy:.5f}')
     print(f'Top5: {top5_accuracy:.5f}')
     print(f'Top10: {top10_accuracy:.5f}')
 
