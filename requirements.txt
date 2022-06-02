@@ -15,7 +15,7 @@ folium==0.5.0
 geojson==2.3.0
 graphviz==0.8.2
 haversine==0.4.5
-html5lib==0.9999999
+html5lib==0.99999999
 idna==2.6
 iml==0.3.5
 ipykernel==4.8.1
